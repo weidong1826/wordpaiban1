@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>论文/报告自动排版助手</title>
+    <!-- 引入 Tailwind CSS 进行快速样式开发 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 FontAwesome 图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        /* 引入中文字体 */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Noto Sans SC', sans-serif;
+            background-color: #f3f4f6;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* 模拟 A4 纸张样式 */
+        .a4-page {
+            width: 210mm;
+            min-height: 297mm; /* A4 高度 */
+            padding: 25.4mm; /* 标准页边距 1英寸 */
+            margin: 0 auto;
+            background: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            color: #000;
+            font-family: 'Noto Serif SC', serif; /* 正文使用衬线体，更像文档 */
+            font-size: 12pt; /* 标准小四号字左右 */
+            overflow-y: visible;
+            outline: none;
+            /* 确保长内容时背景连贯 */
+            min-height: calc(100vh - 40px); 
+        }
+
+        /* 编辑器内部样式重置，确保导出时格式兼容 */
+        .a4-page h1 { font-size: 22pt; font-weight: bold; margin-top: 24pt; margin-bottom: 18pt; text-align: center; page-break-after: avoid; }
+        .a4-page h2 { font-size: 16pt; font-weight: bold; margin-top: 18pt; margin-bottom: 12pt; border-bottom: 1px solid #eee; padding-bottom: 5px; page-break-after: avoid; }
+        .a4-page h3 { font-size: 14pt; font-weight: bold; margin-top: 12pt; margin-bottom: 6pt; page-break-after: avoid; }
+        .a4-page p { margin-bottom: 0; line-height: 1.5; text-align: justify; }
+        
+        /* 目录样式 */
+        .toc-container {
+            background-color: #f8fafc;
+            border: 1px solid #e2e8f0;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 4px;
+        }
+        .toc-title { font-weight: bold; font-size: 14pt; text-align: center; margin-bottom: 10px; }
+        .toc-item { margin-bottom: 4px; }
+        .toc-h1 { margin-left: 0; font-weight: bold; margin-top: 8px; }
+        .toc-h2 { margin-left: 20px; }
+        .toc-h3 { margin-left: 40px; color: #666; font-size: 0.9em; }
+        .toc-link { text-decoration: none; color: #2563eb; border-bottom: 1px dashed #cbd5e1; cursor: pointer;}
+        .toc-link:hover { color: #1e40af; border-bottom-style: solid; }
+
+        /* 滚动条美化 */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+
+        /* 打印样式 */
+        @media print {
+            body * { visibility: hidden; }
+            #editor-container, #editor-container * { visibility: visible; }
+            #editor-container { position: absolute; left: 0; top: 0; width: 100%; margin: 0; padding: 0; }
+            .a4-page { box-shadow: none; margin: 0; width: 100%; }
+        }
+
+        /* Toast 提示动画 */
+        .toast {
+            visibility: hidden;
+            min-width: 250px;
+            background-color: #333;
+            color: #fff;
+            text-align: center;
+            border-radius: 4px;
+            padding: 16px;
+            position: fixed;
+            z-index: 100;
+            left: 50%;
+            bottom: 30px;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .toast.show { visibility: visible; opacity: 1; }
+
+        /* 悬浮工具栏样式 */
+        #floating-toolbar {
+            position: absolute;
+            background-color: #1f2937; /* Gray 800 */
+            border-radius: 8px;
+            padding: 6px;
+            display: none;
+            gap: 4px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            z-index: 50;
+            transform: translateX(-50%);
+            align-items: center;
+        }
+        #floating-toolbar::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: #1f2937 transparent transparent transparent;
+        }
+        .toolbar-btn {
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            user-select: none;
+        }
+        .toolbar-btn:hover {
+            background-color: #374151; /* Gray 700 */
+        }
+        .toolbar-btn.active {
+            background-color: #2563eb; /* Blue 600 */
+        }
+        .toolbar-divider {
+            width: 1px;
+            height: 20px;
+            background-color: #4b5563;
+            margin: 0 4px;
+        }
+    </style>
+</head>
+<body class="flex flex-col h-screen">
+
+    <!-- 顶部导航栏 -->
+    <header class="bg-white border-b border-gray-200 px-6 py-3 flex justify-between items-center shadow-sm z-10">
+        <div class="flex items-center gap-3">
+            <div class="bg-blue-600 text-white p-2 rounded-lg">
+                <i class="fa-solid fa-file-word fa-lg"></i>
+            </div>
+            <div>
+                <h1 class="text-xl font-bold text-gray-800">文档排版助手</h1>
+                <p class="text-xs text-gray-500">自动整理编号、段落与目录</p>
+            </div>
+        </div>
+        <div class="flex gap-2">
+            <button onclick="loadDemo()" class="text-sm text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded transition">
+                <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> 加载长篇示例
+            </button>
+            <button onclick="clearEditor()" class="text-sm text-red-600 hover:bg-red-50 px-3 py-1.5 rounded transition">
+                <i class="fa-solid fa-trash mr-1"></i> 清空
+            </button>
+        </div>
+    </header>
+
+    <!-- 主体内容 -->
+    <main class="flex flex-1 overflow-hidden relative">
+        
+        <!-- 左侧工具栏 -->
+        <aside class="w-80 bg-white border-r border-gray-200 flex flex-col overflow-y-auto p-5 gap-6 shadow-sm z-10">
+            
+            <!-- 工具组 1: 格式化 -->
+            <div class="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                <h3 class="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">
+                    <i class="fa-solid fa-align-left mr-2 text-blue-500"></i>正文排版
+                </h3>
+                <div class="space-y-2">
+                    <button onclick="formatParagraphs()" class="w-full text-left bg-white border border-gray-200 hover:border-blue-400 hover:text-blue-600 text-gray-700 px-4 py-2 rounded-lg transition shadow-sm flex items-center group">
+                        <span class="bg-blue-100 text-blue-600 w-6 h-6 rounded flex items-center justify-center text-xs mr-3 group-hover:bg-blue-600 group-hover:text-white transition">P</span>
+                        <div>
+                            <span class="font-medium block text-sm">标准段落格式</span>
+                            <span class="text-xs text-gray-400">首行缩进2字符, 1.5倍行距</span>
+                        </div>
+                    </button>
+                    <button onclick="removeEmptyLines()" class="w-full text-left bg-white border border-gray-200 hover:border-blue-400 hover:text-blue-600 text-gray-700 px-4 py-2 rounded-lg transition shadow-sm flex items-center group">
+                        <span class="bg-gray-100 text-gray-600 w-6 h-6 rounded flex items-center justify-center text-xs mr-3 group-hover:bg-gray-600 group-hover:text-white transition"><i class="fa-solid fa-eraser"></i></span>
+                        <span class="font-medium text-sm">删除多余空行</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 工具组 2: 标题与目录 -->
+            <div class="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                <h3 class="text-sm font-bold text-gray-700 mb-3 uppercase tracking-wider">
+                    <i class="fa-solid fa-list-ol mr-2 text-green-500"></i>结构与目录
+                </h3>
+                
+                <!-- 编号选项 -->
+                <div class="mb-2">
+                    <label class="block text-xs font-medium text-gray-500 mb-1 ml-1">编号模式：</label>
+                    <select id="numbering-mode" class="w-full bg-white border border-gray-300 text-gray-700 text-sm rounded-lg focus:ring-green-500 focus:border-green-500 block p-2">
+                        <option value="standard">1. 标准模式 (H1=1, H2=1.1)</option>
+                        <option value="skip-h1">2. 论文模式 (H1不编号, H2=1)</option>
+                        <option value="clean">3. 仅清除编号 (不添加新编号)</option>
+                    </select>
+                </div>
+
+                <div class="space-y-2">
+                    <button onclick="autoNumberHeadings()" class="w-full text-left bg-white border border-gray-200 hover:border-green-400 hover:text-green-600 text-gray-700 px-4 py-2 rounded-lg transition shadow-sm flex items-center group">
+                        <span class="bg-green-100 text-green-600 w-6 h-6 rounded flex items-center justify-center text-xs mr-3 group-hover:bg-green-600 group-hover:text-white transition">1.</span>
+                        <div>
+                            <span class="font-medium block text-sm">应用/更新标题编号</span>
+                            <span class="text-xs text-gray-400">基于上方选择的模式</span>
+                        </div>
+                    </button>
+                    <button onclick="generateTOC()" class="w-full text-left bg-white border border-gray-200 hover:border-green-400 hover:text-green-600 text-gray-700 px-4 py-2 rounded-lg transition shadow-sm flex items-center group">
+                        <span class="bg-green-100 text-green-600 w-6 h-6 rounded flex items-center justify-center text-xs mr-3 group-hover:bg-green-600 group-hover:text-white transition"><i class="fa-solid fa-list"></i></span>
+                        <span class="font-medium text-sm">生成/更新目录</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 工具组 3: 导出 -->
+            <div class="mt-auto">
+                <button onclick="exportToWord()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg hover:shadow-xl transition transform hover:-translate-y-0.5 flex items-center justify-center">
+                    <i class="fa-solid fa-download mr-2"></i> 导出为 Word (.doc)
+                </button>
+                <p class="text-xs text-center text-gray-400 mt-2">导出后请在 Word 中更新页码字段</p>
+            </div>
+        </aside>
+
+        <!-- 右侧预览/编辑区 -->
+        <section class="flex-1 bg-gray-200 overflow-y-auto p-8 flex justify-center relative" id="editor-container">
+            
+            <!-- 编辑器容器 -->
+            <div id="editor" contenteditable="true" class="a4-page" spellcheck="false" 
+                 data-placeholder="在此处粘贴您的论文内容，或者点击上方加载示例文本...">
+            </div>
+
+            <!-- 悬浮工具栏 -->
+            <div id="floating-toolbar">
+                <div class="toolbar-btn" onclick="setHeading('H1')" title="设为一级标题">H1</div>
+                <div class="toolbar-btn" onclick="setHeading('H2')" title="设为二级标题">H2</div>
+                <div class="toolbar-btn" onclick="setHeading('H3')" title="设为三级标题">H3</div>
+                <div class="toolbar-btn" onclick="setHeading('P')" title="设为正文">正文</div>
+                <div class="toolbar-divider"></div>
+                <div class="toolbar-btn text-green-400" onclick="autoNumberHeadings()" title="立即刷新编号">
+                    <i class="fa-solid fa-arrow-down-1-9"></i> 刷新
+                </div>
+            </div>
+
+        </section>
+
+    </main>
+
+    <!-- 提示框 -->
+    <div id="toast" class="toast">操作成功</div>
+
+    <script>
+        // 获取编辑器元素
+        const editor = document.getElementById('editor');
+        const toolbar = document.getElementById('floating-toolbar');
+        const editorContainer = document.getElementById('editor-container');
+
+        // 显示 Toast 提示
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.style.backgroundColor = type === 'error' ? '#ef4444' : '#333';
+            toast.className = "toast show";
+            setTimeout(function(){ toast.className = toast.className.replace("show", ""); }, 3000);
+        }
+
+        // --- 悬浮工具栏逻辑 ---
+
+        function updateToolbarPosition() {
+            const selection = window.getSelection();
+            
+            // 检查是否有选区，且选区在编辑器内
+            if (selection.isCollapsed || !editor.contains(selection.anchorNode)) {
+                toolbar.style.display = 'none';
+                return;
+            }
+
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+            
+            // 如果选区不可见（例如宽度为0），隐藏
+            if (rect.width === 0 && rect.height === 0) {
+                toolbar.style.display = 'none';
+                return;
+            }
+
+            // 计算相对位置 (需要减去容器的滚动偏移等，但 position: fixed/absolute 视情况而定)
+            // 这里我们用 absolute 定位在 body 或 main 上，由于 main 是 relative，我们基于 main
+            // rect 是相对于视口的
+            
+            // 由于 #editor-container 有 overflow-y-auto，toolbar 最好放在 body 下或者 main 下使用 fixed?
+            // 但为了简单和跟随滚动，我们把 toolbar 放在 #editor-container 内部，使用 absolute
+            // 并需要加上 scrollTop
+            
+            // 重新修正：将 toolbar 放在 #editor-container 内 (Main section)
+            // 它的 offsetParent 是 Main (relative)
+            
+            // 获取 container 的 rect 用于计算相对坐标
+            const containerRect = editorContainer.getBoundingClientRect();
+
+            const top = rect.top - containerRect.top + editorContainer.scrollTop - 50; // 50px 向上偏移
+            const left = rect.left - containerRect.left + (rect.width / 2);
+
+            toolbar.style.top = `${top}px`;
+            toolbar.style.left = `${left}px`;
+            toolbar.style.display = 'flex';
+        }
+
+        // 监听选区变化
+        document.addEventListener('selectionchange', () => {
+            // 使用防抖或简单的延迟来避免频繁重绘
+            setTimeout(updateToolbarPosition, 10);
+        });
+        
+        // 监听滚动，隐藏工具栏 (简单处理)
+        editorContainer.addEventListener('scroll', () => {
+            toolbar.style.display = 'none'; 
+            // 也可以选择实时更新位置，但隐藏更简单，用户松手或重新选择时再显示
+        });
+
+        // 设置标题级别
+        function setHeading(tagName) {
+            // 使用 execCommand 是最兼容 contenteditable 的方式（尽管已废弃，但目前唯一可靠的原生方案）
+            document.execCommand('formatBlock', false, tagName);
+            
+            // 格式化后，保留选区以便继续操作？或者隐藏工具栏
+            // 这里我们不隐藏，允许用户点击刷新
+            
+            // 可选：如果用户想自动刷新，可以点击工具栏上的刷新按钮
+            // 我们也可以尝试在这里自动清理旧的数字前缀（例如把 "1.1 标题" 变成 "标题"）
+            // 这样下次刷新编号时不会重复
+            
+            cleanCurrentLineNumbering();
+        }
+
+        // 清理当前选中行的旧编号（辅助函数）
+        function cleanCurrentLineNumbering() {
+            const selection = window.getSelection();
+            if (!selection.rangeCount) return;
+            const node = selection.anchorNode;
+            // 找到包含当前选区的块级元素
+            let block = node.nodeType === 3 ? node.parentNode : node;
+            while(block && block !== editor && !['H1','H2','H3','P'].includes(block.tagName)) {
+                block = block.parentNode;
+            }
+            
+            if (block && block !== editor) {
+                 // 简单的正则清理开头数字
+                 let text = block.innerText;
+                 // 如果看起来像编号开头
+                 if (/^([0-9\.]+|[一二三四五六七八九十]+[、\.])\s/.test(text)) {
+                     block.innerText = text.replace(/^([0-9\.]+|[一二三四五六七八九十]+[、\.])\s*/, '');
+                 }
+            }
+        }
+
+
+        // --- 原有功能 ---
+
+        // 生成一段 Lorem Ipsum 风格的中文长文本
+        function getLongText(paragraphs = 3) {
+            const textBase = "人工智能（Artificial Intelligence），英文缩写为AI。它是研究、开发用于模拟、延伸和扩展人的智能的理论、方法、技术及应用系统的一门新的技术科学。人工智能是计算机科学的一个分支，它企图了解智能的实质，并生产出一种新的能以人类智能相似的方式做出反应的智能机器。";
+            let result = "";
+            for(let i=0; i<paragraphs; i++) {
+                result += `<p>${textBase} 随着计算能力的提升和大数据技术的发展，深度学习算法在图像识别、语音识别等领域取得了突破性进展。</p>`;
+            }
+            return result;
+        }
+
+        function loadDemo() {
+            let content = `
+                <h1>2025年人工智能技术发展综述报告</h1>
+                <p><strong>摘要：</strong>本文全面回顾了过去一年人工智能技术的主要突破，重点分析了大语言模型、多模态生成以及具身智能的发展现状。</p>
+                
+                <h2>引言</h2>
+                ${getLongText(1)}
+                
+                <h2>技术演进路线</h2>
+                <h3>早期探索阶段</h3>
+                ${getLongText(1)}
+                <h3>机器学习的兴起</h3>
+                ${getLongText(1)}
+                <h3>深度学习革命</h3>
+                ${getLongText(2)}
+
+                <h2>核心技术架构分析</h2>
+                <h3>Transformer 模型架构</h3>
+                ${getLongText(1)}
+                <h3>注意力机制详解</h3>
+                ${getLongText(2)}
+
+                <h2>当前行业应用现状</h2>
+                <h3>智能制造与工业4.0</h3>
+                ${getLongText(2)}
+                <h3>智慧医疗辅助诊断</h3>
+                ${getLongText(2)}
+
+                <h2>结论</h2>
+                <p>综上所述，人工智能正在经历从感知智能向认知智能跨越的关键时期。</p>
+                
+                <h2>参考文献</h2>
+                <p>[1] Turing, A. M. (1950). Computing Machinery and Intelligence.</p>
+                <p>[2] LeCun, Y., Bengio, Y., & Hinton, G. (2015). Deep learning.</p>
+            `;
+            editor.innerHTML = content;
+            showToast('已加载长篇示例文本');
+        }
+
+        function clearEditor() {
+            if(confirm('确定要清空所有内容吗？')) {
+                editor.innerHTML = '';
+                showToast('内容已清空');
+            }
+        }
+
+        function formatParagraphs() {
+            const paragraphs = editor.querySelectorAll('p');
+            if (paragraphs.length === 0) {
+                showToast('未找到段落', 'error');
+                return;
+            }
+            paragraphs.forEach(p => {
+                p.style.textIndent = '2em';
+                p.style.lineHeight = '1.5';
+                p.style.textAlign = 'justify';
+                p.style.marginBottom = '0'; 
+                p.style.marginTop = '0';
+                p.className = 'mb-1';
+            });
+            showToast('已应用标准段落格式');
+        }
+
+        function removeEmptyLines() {
+            const children = Array.from(editor.childNodes);
+            let removedCount = 0;
+            children.forEach(node => {
+                if (node.nodeType === Node.TEXT_NODE && !node.textContent.trim()) {
+                } else if (node.tagName === 'P' || node.tagName === 'DIV') {
+                    if (!node.innerText.trim() && !node.querySelector('img') && !node.querySelector('hr')) {
+                        node.remove();
+                        removedCount++;
+                    }
+                }
+            });
+            showToast(`已清理 ${removedCount} 个空行`);
+        }
+
+        function autoNumberHeadings() {
+            const headers = editor.querySelectorAll('h1, h2, h3');
+            if (headers.length === 0) {
+                showToast('未找到标题 (H1-H3)', 'error');
+                return;
+            }
+            const mode = document.getElementById('numbering-mode').value;
+            let h1 = 0, h2 = 0, h3 = 0;
+
+            headers.forEach(header => {
+                // 清理旧编号
+                let text = header.innerText.replace(/^([0-9\.]+|[一二三四五六七八九十]+[、\.])\s*/, '');
+                
+                if (mode === 'clean') {
+                    header.innerText = text;
+                    return;
+                }
+                let prefix = '';
+                if (header.tagName === 'H1') {
+                    h2 = 0; h3 = 0;
+                    if (mode === 'standard') { h1++; prefix = `${h1}. `; }
+                } else if (header.tagName === 'H2') {
+                    h3 = 0;
+                    if (mode === 'standard') { h2++; prefix = `${h1}.${h2} `; }
+                    else if (mode === 'skip-h1') { h2++; prefix = `${h2}. `; }
+                } else if (header.tagName === 'H3') {
+                    if (mode === 'standard') { h3++; prefix = `${h1}.${h2}.${h3} `; }
+                    else if (mode === 'skip-h1') { h3++; prefix = `${h2}.${h3} `; }
+                }
+                header.innerText = prefix + text;
+            });
+            if (mode === 'clean') showToast('已清除所有编号');
+            else showToast('标题编号已更新');
+        }
+
+        function generateTOC() {
+            const oldToc = editor.querySelector('.toc-container');
+            if (oldToc) oldToc.remove();
+            const headers = editor.querySelectorAll('h1, h2, h3');
+            if (headers.length === 0) {
+                showToast('没有标题，无法生成目录', 'error');
+                return;
+            }
+            const tocDiv = document.createElement('div');
+            tocDiv.className = 'toc-container';
+            tocDiv.contentEditable = "false"; 
+            
+            const tocTitle = document.createElement('div');
+            tocTitle.className = 'toc-title';
+            tocTitle.innerText = '目 录';
+            tocDiv.appendChild(tocTitle);
+
+            headers.forEach((header, index) => {
+                const anchorId = `toc-heading-${index}`;
+                header.id = anchorId;
+                const tocItem = document.createElement('div');
+                tocItem.className = 'toc-item';
+                
+                if (header.tagName === 'H1') tocItem.className += ' toc-h1';
+                else if (header.tagName === 'H2') tocItem.className += ' toc-h2';
+                else if (header.tagName === 'H3') tocItem.className += ' toc-h3';
+
+                const link = document.createElement('a');
+                link.href = `#${anchorId}`;
+                link.className = 'toc-link';
+                link.innerText = header.innerText;
+                link.onclick = (e) => {
+                    e.preventDefault();
+                    document.getElementById(anchorId).scrollIntoView({behavior: 'smooth'});
+                };
+                tocItem.appendChild(link);
+                tocDiv.appendChild(tocItem);
+            });
+            editor.insertBefore(tocDiv, editor.firstChild);
+            showToast('目录生成成功');
+        }
+
+        function exportToWord() {
+            const content = editor.innerHTML;
+            if (!content.trim()) {
+                showToast('文档为空', 'error');
+                return;
+            }
+            const preHtml = `
+                <html xmlns:o='urn:schemas-microsoft-com:office:office' 
+                      xmlns:w='urn:schemas-microsoft-com:office:word' 
+                      xmlns='http://www.w3.org/TR/REC-html40'>
+                <head><meta charset='utf-8'><title>Export</title>
+                <style>
+                    body { font-family: '宋体', 'SimSun', serif; }
+                    h1 { font-size: 22pt; font-weight: bold; text-align: center; mso-outline-level:1; }
+                    h2 { font-size: 16pt; font-weight: bold; mso-outline-level:2; }
+                    h3 { font-size: 14pt; font-weight: bold; mso-outline-level:3; }
+                    p { font-size: 12pt; line-height: 1.5; text-align: justify; text-indent: 2em; margin:0; }
+                    .toc-container { border: 1px solid #ccc; padding: 10px; background: #f9f9f9; margin-bottom: 20px;}
+                    .toc-title { text-align: center; font-weight: bold; font-size: 14pt; }
+                    a { color: blue; text-decoration: none; }
+                </style></head><body>`;
+            const postHtml = "</body></html>";
+            const html = preHtml + content + postHtml;
+            const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+            const downloadLink = document.createElement("a");
+            document.body.appendChild(downloadLink);
+            if (navigator.msSaveOrOpenBlob) {
+                navigator.msSaveOrOpenBlob(blob, 'formatted_document.doc');
+            } else {
+                downloadLink.href = URL.createObjectURL(blob);
+                downloadLink.download = 'formatted_document.doc';
+                downloadLink.click();
+            }
+            document.body.removeChild(downloadLink);
+            showToast('文档导出中...');
+        }
+    </script>
+</body>
+</html>
